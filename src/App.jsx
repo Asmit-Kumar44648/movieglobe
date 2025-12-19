@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Canvas } from '@react-three/fiber';
 import * as THREE from 'three';
-import MovieGlobe from './MovieGlobe';
+import MovieGlobe from './movieglobe';
 import { X, Play, Zap, Search, Loader2 } from 'lucide-react';
 
 const API_KEY = import.meta.env.VITE_TMDB_KEY;
