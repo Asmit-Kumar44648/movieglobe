@@ -30,7 +30,14 @@ function MoviePoster({ movie, position, onSelect, isSelected }) {
         />
       </Float>
       {!isSelected && (
-        <Text position={[0, -1.4, 0]} fontSize={0.12} color="white" maxWidth={1.5} textAlign="center">
+        <Text 
+          position={[0, -1.4, 0]} 
+          fontSize={0.12} 
+          color="white" 
+          maxWidth={1.5} 
+          textAlign="center"
+          font="https://fonts.gstatic.com/s/raleway/v28/1Ptxg8zYS_SKggPN4iEgvnHyvveLxVvaorCIPrQ.ttf"
+        >
           {movie.title}
         </Text>
       )}
@@ -41,6 +48,8 @@ function MoviePoster({ movie, position, onSelect, isSelected }) {
 function GlobeScene({ movies, onSelect, targetPos, selectedMovie }) {
   const { camera } = useThree();
   const groupRef = useRef();
+  
+  // Math: Fibonacci distribution for the posters
   const radius = useMemo(() => Math.sqrt(movies.length) * 2.8 + 8, [movies.length]);
 
   const positions = useMemo(() => {
@@ -54,8 +63,11 @@ function GlobeScene({ movies, onSelect, targetPos, selectedMovie }) {
   }, [movies, radius]);
 
   useFrame((state, delta) => {
+    // Smooth Camera Movement
     camera.position.lerp(targetPos.current.pos, 0.08);
     camera.lookAt(0, 0, 0);
+    
+    // Slow rotation when not zoomed into a movie
     if (!targetPos.current.active && groupRef.current) {
       groupRef.current.rotation.y += delta * 0.12;
     }
@@ -64,10 +76,19 @@ function GlobeScene({ movies, onSelect, targetPos, selectedMovie }) {
   return (
     <>
       <Stars radius={100} depth={50} count={7000} factor={4} fade speed={1} />
-      <ambientLight intensity={0.8} />
+      <ambientLight intensity={0.4} />
+      {/* PRO TIP: THE INTERNAL SUN - Lights posters from the inside out */}
+      <pointLight position={[0, 0, 0]} intensity={3} color="#ffffff" distance={50} />
+      
       <group ref={groupRef}>
         {movies.map((m, i) => (
-          <MoviePoster key={`${m.id}-${i}`} movie={m} position={positions[i]} onSelect={onSelect} isSelected={selectedMovie?.id === m.id} />
+          <MoviePoster 
+            key={`${m.id}-${i}`} 
+            movie={m} 
+            position={positions[i]} 
+            onSelect={onSelect} 
+            isSelected={selectedMovie?.id === m.id} 
+          />
         ))}
       </group>
     </>
@@ -85,30 +106,46 @@ export default function App() {
   const targetPos = useRef({ pos: new THREE.Vector3(0, 0, 30), active: false });
 
   const loadMovies = async (isSearch = false) => {
+    if (!API_KEY || API_KEY === 'YOUR_TMDB_API_KEY') return;
+
     setLoading(true);
     const endpoint = isSearch 
-      ? `https://api.themoviedb.org/3/search/movie?api_key=${API_KEY}&query=${query}`
+      ? `https://api.themoviedb.org/3/search/movie?api_key=${API_KEY}&query=${encodeURIComponent(query)}`
       : `https://api.themoviedb.org/3/movie/popular?api_key=${API_KEY}&page=${page}`;
     
     try {
       const res = await fetch(endpoint);
       const data = await res.json();
-      const formatted = data.results.map(m => ({
-        id: m.id,
-        title: m.title,
-        poster: m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : 'https://via.placeholder.com/500x750',
-        overview: m.overview,
-        rating: m.vote_average
-      }));
+      
+      if (!data.results || data.results.length === 0) {
+        if (isSearch) alert("No results found in this galaxy!");
+        targetPos.current = { pos: new THREE.Vector3(0, 0, 30), active: false };
+        setLoading(false);
+        return;
+      }
+
+      const formatted = data.results
+        .filter(m => m.poster_path)
+        .map(m => ({
+          id: m.id,
+          title: m.title,
+          poster: `https://image.tmdb.org/t/p/w500${m.poster_path}`,
+          overview: m.overview,
+          rating: m.vote_average
+        }));
       
       if (isSearch) {
         setMovies(formatted);
+        // Instant Warp back to view the new sphere
         targetPos.current = { pos: new THREE.Vector3(0, 0, 30), active: false };
       } else {
         setMovies(prev => [...prev, ...formatted]);
         setPage(p => p + 1);
       }
-    } catch (e) { console.error(e); }
+    } catch (e) { 
+      console.error(e);
+      targetPos.current = { pos: new THREE.Vector3(0, 0, 30), active: false };
+    }
     setLoading(false);
   };
 
@@ -116,13 +153,16 @@ export default function App() {
 
   const handleSearch = (e) => {
     e.preventDefault();
+    if (!query.trim()) return;
     setSelected(null);
-    targetPos.current = { pos: new THREE.Vector3(0, 0, 60), active: true };
-    setTimeout(() => loadMovies(true), 400);
+    // Warp out effect
+    targetPos.current = { pos: new THREE.Vector3(0, 15, 70), active: true };
+    setTimeout(() => loadMovies(true), 500);
   };
 
   const handleSelect = (movie, pos) => {
     setSelected(movie);
+    // Position camera 35% away from the movie center
     targetPos.current = { pos: pos.clone().multiplyScalar(1.35), active: true };
   };
 
@@ -132,7 +172,7 @@ export default function App() {
         <GlobeScene movies={movies} onSelect={handleSelect} targetPos={targetPos} selectedMovie={selected} />
       </Canvas>
 
-      {/* Search Header */}
+      {/* Glassmorphism Search Bar */}
       <div className="absolute top-10 left-1/2 -translate-x-1/2 z-20 w-[90%] max-w-lg">
         <form onSubmit={handleSearch} className="relative group">
           <input 
@@ -140,7 +180,7 @@ export default function App() {
             placeholder="Search Galaxy..." 
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="w-full bg-white/5 backdrop-blur-2xl border border-white/10 px-14 py-4 rounded-full outline-none focus:border-white/30 focus:bg-white/10 transition-all text-lg"
+            className="w-full bg-white/5 backdrop-blur-3xl border border-white/10 px-14 py-4 rounded-full outline-none focus:border-white/30 focus:bg-white/10 transition-all text-lg tracking-tight"
           />
           <Search className="absolute left-5 top-1/2 -translate-y-1/2 opacity-40 group-focus-within:opacity-100 transition-opacity" size={24} />
           {loading && <Loader2 className="absolute right-5 top-1/2 -translate-y-1/2 animate-spin text-yellow-400" size={24} />}
@@ -149,30 +189,38 @@ export default function App() {
 
       {/* Detail Panel */}
       {selected && (
-        <div className="absolute inset-0 z-50 flex items-center justify-end p-4 md:p-12 pointer-events-none bg-black/40">
-          <div className="w-full md:w-[480px] p-10 rounded-[3rem] pointer-events-auto flex flex-col shadow-2xl animate-in fade-in slide-in-from-right-20 duration-500 bg-black/60 backdrop-blur-3xl border border-white/10">
-            <button onClick={() => {setSelected(null); targetPos.current.active = false;}} className="absolute top-10 right-10 opacity-40 hover:opacity-100 transition-all">
+        <div className="absolute inset-0 z-50 flex items-center justify-end p-4 md:p-12 pointer-events-none bg-black/40 animate-in fade-in duration-300">
+          <div className="w-full md:w-[480px] p-10 rounded-[3rem] pointer-events-auto flex flex-col shadow-2xl bg-black/60 backdrop-blur-3xl border border-white/10 animate-in slide-in-from-right-10 duration-500">
+            <button 
+              onClick={() => {setSelected(null); targetPos.current.active = false;}} 
+              className="absolute top-10 right-10 opacity-40 hover:opacity-100 transition-all"
+            >
               <X size={32}/>
             </button>
-            <div className="flex items-center gap-2 mb-4 text-yellow-500 font-bold tracking-widest text-sm">
-              <Star size={16} fill="currentColor" /> {selected.rating.toFixed(1)}
+            <div className="flex items-center gap-2 mb-4 text-yellow-500 font-bold tracking-widest text-sm uppercase">
+              <Star size={16} fill="currentColor" /> {selected.rating.toFixed(1)} / 10
             </div>
             <h2 className="text-4xl font-black mb-6 uppercase tracking-tighter leading-none">{selected.title}</h2>
-            <p className="text-gray-400 text-lg leading-relaxed mb-10 line-clamp-6 italic">{selected.overview}</p>
+            <p className="text-gray-400 text-lg leading-relaxed mb-10 overflow-y-auto max-h-[30vh] pr-2 custom-scrollbar italic">
+              {selected.overview}
+            </p>
             <div className="flex gap-4">
-              <button className="flex-1 bg-white text-black py-5 rounded-2xl font-black flex items-center justify-center gap-2 hover:bg-gray-200 transition-all active:scale-95 uppercase">
+              <button className="flex-1 bg-white text-black py-5 rounded-2xl font-black flex items-center justify-center gap-2 hover:bg-gray-200 transition-all active:scale-95 uppercase tracking-widest">
                 <Play size={22} fill="black" /> Trailer
               </button>
-              <button className="p-5 rounded-2xl border border-white/10 hover:bg-white/5"><Heart/></button>
+              <button className="p-5 rounded-2xl border border-white/10 hover:bg-white/5 transition-all active:scale-95"><Heart/></button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Discovery Bottom UI */}
+      {/* Expand Button */}
       {!selected && (
-        <div className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-4 z-10">
-          <button onClick={() => loadMovies()} className="flex items-center gap-3 px-10 py-5 rounded-full bg-white/5 backdrop-blur-xl border border-white/10 hover:bg-white/10 transition-all shadow-2xl active:scale-95">
+        <div className="absolute bottom-12 left-1/2 -translate-x-1/2 z-10">
+          <button 
+            onClick={() => loadMovies()} 
+            className="flex items-center gap-3 px-10 py-5 rounded-full bg-white/5 backdrop-blur-xl border border-white/10 hover:bg-white/10 transition-all shadow-2xl active:scale-95"
+          >
             <Zap size={20} className="text-yellow-400 fill-yellow-400" />
             <span className="font-bold tracking-widest text-xs uppercase">Expand discovery</span>
           </button>
