@@ -4,7 +4,7 @@ import { Image, Text, Stars, Float, Environment } from '@react-three/drei';
 import * as THREE from 'three';
 import { X, Play, Zap, Heart, Star } from 'lucide-react';
 
-const API_KEY = 'YOUR_TMDB_API_KEY'; // Replace with your real key!
+const API_KEY = import.meta.env.VITE_TMDB_KEY;
 
 // 3D POSTER COMPONENT
 function MoviePoster({ movie, position, onSelect, isSelected }) {
