@@ -10,7 +10,8 @@ import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChang
 import { getFirestore, doc, setDoc, deleteDoc, onSnapshot, collection } from "firebase/firestore";
 
 // --- CONFIGS ---
-const API_KEY = import.meta.env.VITE_TMDB_KEY;
+// This line pulls the key from your Vercel Environment Variables
+const TMDB_KEY = import.meta.env.VITE_TMDB_KEY; 
 
 const firebaseConfig = {
   apiKey: "AIzaSyBAlzr5iDMGukw5ms2IRMU_YHKYbLOiEg4",
@@ -21,7 +22,6 @@ const firebaseConfig = {
   appId: "1:700475939762:web:013f67a50c2e753266e2ab",
   measurementId: "G-B2HTCHCFC0"
 };
-
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
