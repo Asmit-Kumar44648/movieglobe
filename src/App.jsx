@@ -36,22 +36,22 @@ const GENRES = [
   { id: 16, name: 'Animation', color: '#ff66cc' },
 ];
 
-// --- SPACE DUST ---
-function SpaceDust({ count = 1000 }) {
+// --- SPACE DUST (REDUCED FOR STABILITY) ---
+function SpaceDust({ count = 800 }) {
   const points = useMemo(() => {
     const p = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
-      p[i * 3] = (Math.random() - 0.5) * 120;
-      p[i * 3 + 1] = (Math.random() - 0.5) * 120;
-      p[i * 3 + 2] = (Math.random() - 0.5) * 120;
+      p[i * 3] = (Math.random() - 0.5) * 100;
+      p[i * 3 + 1] = (Math.random() - 0.5) * 100;
+      p[i * 3 + 2] = (Math.random() - 0.5) * 100;
     }
     return p;
   }, [count]);
   const ref = useRef();
-  useFrame(() => { if (ref.current) ref.current.rotation.y += 0.0003; });
+  useFrame(() => { if (ref.current) ref.current.rotation.y += 0.0002; });
   return (
     <Points ref={ref} positions={points} stride={3}>
-      <PointMaterial transparent color="#ffffff" size={0.05} sizeAttenuation={true} depthWrite={false} opacity={0.3} />
+      <PointMaterial transparent color="#ffffff" size={0.06} sizeAttenuation={true} depthWrite={false} opacity={0.2} />
     </Points>
   );
 }
@@ -59,9 +59,22 @@ function SpaceDust({ count = 1000 }) {
 // --- 3D COMPONENTS ---
 function MoviePoster({ movie, position, onSelect, isSelected }) {
   const meshRef = useRef();
+  
+  // Clean up textures on unmount to prevent "Context Lost"
+  useEffect(() => {
+    return () => {
+      if (meshRef.current) {
+        meshRef.current.material.dispose();
+      }
+    };
+  }, []);
+
   useFrame(({ camera }) => { 
-    if (meshRef.current) meshRef.current.lookAt(isSelected ? camera.position : new THREE.Vector3(0,0,0));
+    if (meshRef.current) {
+      meshRef.current.lookAt(isSelected ? camera.position : new THREE.Vector3(0,0,0));
+    }
   });
+
   return (
     <group position={position}>
       <Float speed={isSelected ? 0 : 2} rotationIntensity={0.5} floatIntensity={0.5}>
@@ -69,21 +82,31 @@ function MoviePoster({ movie, position, onSelect, isSelected }) {
           ref={meshRef} 
           url={movie.poster} 
           transparent 
-          scale={isSelected ? [4, 6] : [1.8, 2.7]} 
+          scale={isSelected ? [4.2, 6.3] : [1.8, 2.7]} 
           onClick={(e) => { e.stopPropagation(); onSelect(movie, position); }}
         />
       </Float>
-      {!isSelected && <Text position={[0, -2, 0]} fontSize={0.16} color="white" textAlign="center">{movie.title}</Text>}
+      {!isSelected && <Text position={[0, -2, 0]} fontSize={0.16} color="white" textAlign="center" anchorX="center">{movie.title}</Text>}
     </group>
   );
 }
 
-function GlobeScene({ movies, onSelect, targetPos, selectedMovie, genreColor, isWarping }) {
-  const { camera } = useThree();
+function GlobeScene({ movies, onSelect, targetPos, selectedMovie, genreColor, isWarping, view }) {
+  const { camera, gl } = useThree();
   const groupRef = useRef();
+  
+  // Dispose of old geometry when movies change
+  useEffect(() => {
+    return () => gl.renderLists.dispose();
+  }, [movies, gl]);
+
   const radius = useMemo(() => Math.sqrt(movies.length || 1) * 3 + 18, [movies.length]);
   
   const positions = useMemo(() => {
+    if (view === 'favs') {
+      // In Favs, put movies in a curved wall in front of the camera
+      return movies.map((_, i) => new THREE.Vector3((i % 5) * 5 - 10, Math.floor(i / 5) * -7 + 5, 0));
+    }
     const phi = Math.PI * (3 - Math.sqrt(5));
     return movies.map((_, i) => {
       const y = 1 - (i / (movies.length - 1)) * 2;
@@ -91,33 +114,35 @@ function GlobeScene({ movies, onSelect, targetPos, selectedMovie, genreColor, is
       const theta = phi * i;
       return new THREE.Vector3(Math.cos(theta) * r * radius, y * radius, Math.sin(theta) * r * radius);
     });
-  }, [movies, radius]);
+  }, [movies, radius, view]);
 
   useFrame((state, delta) => {
-    camera.fov = THREE.MathUtils.lerp(camera.fov, isWarping ? 75 : 45, 0.1);
+    camera.fov = THREE.MathUtils.lerp(camera.fov, isWarping ? 80 : 45, 0.1);
     camera.updateProjectionMatrix();
     camera.position.lerp(targetPos.current.pos, 0.08);
     camera.lookAt(0, 0, 0);
-    if (!targetPos.current.active && groupRef.current) groupRef.current.rotation.y += delta * 0.08;
+    if (!targetPos.current.active && groupRef.current && view !== 'favs') {
+      groupRef.current.rotation.y += delta * 0.08;
+    }
   });
 
   return (
     <>
-      <color attach="background" args={['#000308']} />
-      <Stars radius={150} depth={50} count={6000} factor={4} fade speed={1} />
+      <color attach="background" args={['#000205']} />
+      <Stars radius={150} depth={50} count={5000} factor={4} fade speed={1} />
       <SpaceDust />
-      <ambientLight intensity={0.4} />
-      <pointLight position={[0, 0, 0]} intensity={3} color={genreColor} />
+      <ambientLight intensity={0.5} />
+      <pointLight position={[0, 0, 0]} intensity={2.5} color={genreColor} />
       <OrbitControls enableZoom={false} enablePan={false} />
       <group ref={groupRef}>
         {movies.map((m, i) => (
           <MoviePoster key={`${m.id}-${i}`} movie={m} position={positions[i]} onSelect={onSelect} isSelected={selectedMovie?.id === m.id} />
         ))}
       </group>
-      <EffectComposer disableNormalPass multisampling={0}>
-        <Bloom luminanceThreshold={1} intensity={1.2} radius={0.4} />
-        <Vignette darkness={1.1} />
-        <ChromaticAberration offset={[0.0006, 0.0006]} />
+      <EffectComposer disableNormalPass>
+        <Bloom luminanceThreshold={1} intensity={1.0} radius={0.4} />
+        <Vignette darkness={1.2} />
+        <ChromaticAberration offset={[0.0005, 0.0005]} />
       </EffectComposer>
     </>
   );
@@ -192,11 +217,11 @@ export default function App() {
   const handleSelect = (movie, pos) => {
     if (selected?.id === movie.id) {
       setSelected(null);
-      targetPos.current = { pos: new THREE.Vector3(0, 0, 50), active: false };
+      targetPos.current = { pos: view === 'favs' ? new THREE.Vector3(0,0,25) : new THREE.Vector3(0, 0, 50), active: false };
     } else {
       setSelected(movie);
-      const zoomPos = pos.clone().normalize().multiplyScalar(Math.sqrt(movies.length) * 3 + 12);
-      targetPos.current = { pos: zoomPos, active: true };
+      const zoomPos = pos.clone().normalize().multiplyScalar(view === 'favs' ? 15 : radius + 5); // Logic to zoom into specific position
+      targetPos.current = { pos: pos.clone().add(new THREE.Vector3(0,0,8)), active: true };
     }
   };
 
@@ -211,11 +236,7 @@ export default function App() {
 
   if (!user) return (
     <div className="h-screen w-full bg-black flex flex-col items-center justify-center text-white p-10 overflow-hidden relative">
-      <div className="absolute inset-0 opacity-30">
-        <Canvas gl={{ antialias: false, powerPreference: "high-performance" }}>
-            <Stars/>
-        </Canvas>
-      </div>
+      <div className="absolute inset-0 opacity-20"><Canvas><Stars/></Canvas></div>
       <div className="z-10 text-center space-y-12">
         <h1 className="text-[clamp(80px,15vw,160px)] font-black italic uppercase tracking-tighter leading-none bg-gradient-to-b from-white to-white/10 bg-clip-text text-transparent">Galaxy</h1>
         <button onClick={() => signInWithPopup(auth, provider)} className="w-full bg-white text-black py-6 px-12 rounded-2xl font-black uppercase tracking-widest hover:scale-105 transition-all shadow-2xl">Continue with Google</button>
@@ -224,19 +245,14 @@ export default function App() {
   );
 
   return (
-    <div className="h-screen w-full bg-[#000308] relative overflow-hidden text-white font-sans">
+    <div className="h-screen w-full bg-[#000205] relative overflow-hidden text-white font-sans">
       <Canvas 
         dpr={[1, 1.5]} 
-        gl={{ 
-            powerPreference: "high-performance",
-            antialias: false,
-            stencil: false,
-            depth: true
-        }} 
+        gl={{ powerPreference: "high-performance", antialias: false }} 
         camera={{ fov: 45, near: 0.1, far: 1000 }}
       >
         <Suspense fallback={null}>
-          <GlobeScene movies={movies} onSelect={handleSelect} targetPos={targetPos} selectedMovie={selected} genreColor={activeGenreObj.color} isWarping={isWarping} />
+          <GlobeScene movies={movies} onSelect={handleSelect} targetPos={targetPos} selectedMovie={selected} genreColor={activeGenreObj.color} isWarping={isWarping} view={view} />
         </Suspense>
       </Canvas>
 
@@ -245,7 +261,7 @@ export default function App() {
         <div className="flex items-center gap-4 pointer-events-auto">
           <div className="flex p-1 bg-white/5 backdrop-blur-[25px] rounded-full border border-white/20 shadow-2xl">
             <button onClick={() => setView('explore')} className={`px-8 py-3 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${view === 'explore' ? 'bg-white text-black' : 'text-white/40 hover:text-white'}`}>Explore</button>
-            <button onClick={() => setView('favs')} className={`px-8 py-3 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${view === 'favs' ? 'bg-white text-black' : 'text-white/40 hover:text-white'}`}>Favs</button>
+            <button onClick={() => { setView('favs'); setMovies(Object.values(favs)); targetPos.current.pos = new THREE.Vector3(0,0,25); }} className={`px-8 py-3 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${view === 'favs' ? 'bg-white text-black' : 'text-white/40 hover:text-white'}`}>Favs ({Object.keys(favs).length})</button>
           </div>
           <div className="relative group">
             <button className="px-8 py-3.5 bg-white/5 backdrop-blur-[25px] border border-white/20 rounded-full text-[10px] font-black uppercase tracking-widest">
@@ -277,7 +293,7 @@ export default function App() {
       {selected && (
         <div className="absolute inset-y-0 right-0 z-50 flex items-center p-6 md:p-12 pointer-events-none w-full md:w-auto">
           <div className="w-full md:w-[460px] p-12 rounded-[3.5rem] pointer-events-auto bg-black/40 backdrop-blur-[40px] border border-white/20 shadow-2xl animate-in slide-in-from-right duration-500">
-            <button onClick={() => { setSelected(null); targetPos.current = { pos: new THREE.Vector3(0, 0, 50), active: false }; }} className="absolute top-10 right-10 text-white/30 hover:text-white transition-all"><X size={28}/></button>
+            <button onClick={() => { setSelected(null); targetPos.current = { pos: view === 'favs' ? new THREE.Vector3(0,0,25) : new THREE.Vector3(0, 0, 50), active: false }; }} className="absolute top-10 right-10 text-white/30 hover:text-white transition-all"><X size={28}/></button>
             <div className="flex items-center gap-2 mb-8 text-yellow-500 font-black text-xs uppercase tracking-widest"><Star size={14} fill="currentColor" /> {selected.rating.toFixed(1)}</div>
             <h2 className="text-5xl font-black mb-8 uppercase tracking-tighter leading-[0.9]">{selected.title}</h2>
             <p className="text-white/40 mb-12 text-sm leading-relaxed italic line-clamp-6">{selected.overview}</p>
