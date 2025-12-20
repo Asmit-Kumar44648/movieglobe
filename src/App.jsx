@@ -3,7 +3,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { Image, Text, Stars, Float, OrbitControls, Points, PointMaterial } from '@react-three/drei';
 import { EffectComposer, Bloom, ChromaticAberration, Vignette } from '@react-three/postprocessing';
 import * as THREE from 'three';
-import { X, Zap, Search, Loader2, Star, Heart, LogOut, PlayCircle, Filter } from 'lucide-react';
+import { X, Zap, Search, Star, Heart, LogOut, PlayCircle, Filter } from 'lucide-react';
 
 // FIREBASE
 import { initializeApp } from "firebase/app";
@@ -26,7 +26,6 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const provider = new GoogleAuthProvider();
-provider.setCustomParameters({ prompt: 'select_account' }); // Fixes the COOP window.closed error
 
 const GENRES = [
   { id: null, name: 'Trending', color: '#00f2ff' },
@@ -38,7 +37,7 @@ const GENRES = [
 ];
 
 // --- SPACE DUST ---
-function SpaceDust({ count = 1200 }) { // Slightly reduced count for stability
+function SpaceDust({ count = 1000 }) {
   const points = useMemo(() => {
     const p = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
@@ -72,16 +71,15 @@ function MoviePoster({ movie, position, onSelect, isSelected }) {
           transparent 
           scale={isSelected ? [4, 6] : [1.8, 2.7]} 
           onClick={(e) => { e.stopPropagation(); onSelect(movie, position); }}
-          alt={movie.title}
         />
       </Float>
-      {!isSelected && <Text position={[0, -2, 0]} fontSize={0.16} color="white" textAlign="center" anchorX="center">{movie.title}</Text>}
+      {!isSelected && <Text position={[0, -2, 0]} fontSize={0.16} color="white" textAlign="center">{movie.title}</Text>}
     </group>
   );
 }
 
 function GlobeScene({ movies, onSelect, targetPos, selectedMovie, genreColor, isWarping }) {
-  const { camera, gl } = useThree();
+  const { camera } = useThree();
   const groupRef = useRef();
   const radius = useMemo(() => Math.sqrt(movies.length || 1) * 3 + 18, [movies.length]);
   
@@ -106,7 +104,7 @@ function GlobeScene({ movies, onSelect, targetPos, selectedMovie, genreColor, is
   return (
     <>
       <color attach="background" args={['#000308']} />
-      <Stars radius={150} depth={50} count={5000} factor={4} fade speed={1} />
+      <Stars radius={150} depth={50} count={6000} factor={4} fade speed={1} />
       <SpaceDust />
       <ambientLight intensity={0.4} />
       <pointLight position={[0, 0, 0]} intensity={3} color={genreColor} />
@@ -116,13 +114,11 @@ function GlobeScene({ movies, onSelect, targetPos, selectedMovie, genreColor, is
           <MoviePoster key={`${m.id}-${i}`} movie={m} position={positions[i]} onSelect={onSelect} isSelected={selectedMovie?.id === m.id} />
         ))}
       </group>
-      <Suspense fallback={null}>
-        <EffectComposer disableNormalPass multisampling={0}>
-          <Bloom luminanceThreshold={1} intensity={1.2} radius={0.4} mipmapBlur />
-          <Vignette darkness={0.9} />
-          <ChromaticAberration offset={[0.0005, 0.0005]} />
-        </EffectComposer>
-      </Suspense>
+      <EffectComposer disableNormalPass multisampling={0}>
+        <Bloom luminanceThreshold={1} intensity={1.2} radius={0.4} />
+        <Vignette darkness={1.1} />
+        <ChromaticAberration offset={[0.0006, 0.0006]} />
+      </EffectComposer>
     </>
   );
 }
@@ -210,14 +206,13 @@ export default function App() {
       const data = await res.json();
       const trailer = data.results?.find(v => v.type === "Trailer" && v.site === "YouTube");
       if (trailer) setTrailerKey(trailer.key);
-      else alert("Trailer not found in Galaxy database.");
     } catch (e) { console.error(e); }
   };
 
   if (!user) return (
     <div className="h-screen w-full bg-black flex flex-col items-center justify-center text-white p-10 overflow-hidden relative">
       <div className="absolute inset-0 opacity-30">
-        <Canvas gl={{ powerPreference: "high-performance" }}>
+        <Canvas gl={{ antialias: false, powerPreference: "high-performance" }}>
             <Stars/>
         </Canvas>
       </div>
@@ -231,11 +226,12 @@ export default function App() {
   return (
     <div className="h-screen w-full bg-[#000308] relative overflow-hidden text-white font-sans">
       <Canvas 
-        dpr={[1, 1.5]} // Lowering DPR slightly prevents Context Lost on mobile/browsers
+        dpr={[1, 1.5]} 
         gl={{ 
-            antialias: false, 
             powerPreference: "high-performance",
-            preserveDrawingBuffer: true 
+            antialias: false,
+            stencil: false,
+            depth: true
         }} 
         camera={{ fov: 45, near: 0.1, far: 1000 }}
       >
@@ -300,7 +296,7 @@ export default function App() {
 
       {/* TRAILER OVERLAY */}
       {trailerKey && (
-        <div className="absolute inset-0 z-[100] bg-black/95 flex items-center justify-center p-8 backdrop-blur-3xl">
+        <div className="absolute inset-0 z-[100] bg-black/95 flex items-center justify-center p-8 backdrop-blur-3xl animate-in fade-in duration-500">
            <div className="relative w-full max-w-6xl aspect-video rounded-[2.5rem] overflow-hidden border border-white/10 shadow-2xl">
               <button onClick={() => setTrailerKey(null)} className="absolute top-8 right-8 z-10 p-4 bg-black/60 rounded-full hover:bg-white hover:text-black transition-all"><X size={24}/></button>
               <iframe width="100%" height="100%" src={`https://www.youtube.com/embed/${trailerKey}?autoplay=1`} frameBorder="0" allow="autoplay; encrypted-media" allowFullScreen></iframe>
