@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { Image, Text, Stars, Float } from '@react-three/drei';
+import { Image, Text, Stars, Float, OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
-import { X, Play, Zap, Search, Loader2, Star, Heart, Bookmark, LogOut } from 'lucide-react';
+import { X, Zap, Search, Loader2, Star, Heart, LogOut, PlayCircle, Filter } from 'lucide-react';
 
 // FIREBASE
 import { initializeApp } from "firebase/app";
@@ -27,13 +27,31 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const provider = new GoogleAuthProvider();
 
+// GENRES MAP
+const GENRES = [
+  { id: null, name: 'Popular' },
+  { id: 28, name: 'Action' },
+  { id: 878, name: 'Sci-Fi' },
+  { id: 27, name: 'Horror' },
+  { id: 35, name: 'Comedy' },
+  { id: 16, name: 'Animation' },
+  { id: 18, name: 'Drama' },
+];
+
 // --- 3D COMPONENTS ---
 function MoviePoster({ movie, position, onSelect, isSelected }) {
   const meshRef = useRef();
-  useFrame(() => { if (meshRef.current) meshRef.current.lookAt(0, 0, 0); });
+  // Look at center, but if selected, look at camera
+  useFrame(({ camera }) => { 
+    if (meshRef.current) {
+        if (isSelected) meshRef.current.lookAt(camera.position);
+        else meshRef.current.lookAt(0, 0, 0);
+    }
+  });
+
   return (
     <group position={position}>
-      <Float speed={isSelected ? 0 : 2} rotationIntensity={0.5} floatIntensity={0.5}>
+      <Float speed={isSelected ? 0 : 2} rotationIntensity={0.2} floatIntensity={0.5}>
         <Image 
           ref={meshRef} 
           url={movie.poster} 
@@ -63,9 +81,15 @@ function GlobeScene({ movies, onSelect, targetPos, selectedMovie }) {
   }, [movies, radius]);
 
   useFrame((state, delta) => {
-    camera.position.lerp(targetPos.current.pos, 0.08);
-    camera.lookAt(0, 0, 0);
-    if (!targetPos.current.active && groupRef.current) groupRef.current.rotation.y += delta * 0.08;
+    // Smooth Camera Warp
+    if (targetPos.current.active) {
+        camera.position.lerp(targetPos.current.pos, 0.05);
+        camera.lookAt(0, 0, 0);
+    }
+    // Auto Rotation (only if not dragging/interacting)
+    if (!selectedMovie && groupRef.current) {
+        groupRef.current.rotation.y += delta * 0.05;
+    }
   });
 
   return (
@@ -73,6 +97,16 @@ function GlobeScene({ movies, onSelect, targetPos, selectedMovie }) {
       <Stars radius={100} depth={50} count={6000} factor={4} fade speed={1} />
       <ambientLight intensity={0.6} />
       <pointLight position={[0, 0, 0]} intensity={3} color="#fff" />
+      
+      {/* Mobile Controls: Enable rotation, disable zoom to prevent breaking the warp */}
+      <OrbitControls 
+        enableZoom={false} 
+        enablePan={false} 
+        rotateSpeed={0.5} 
+        autoRotate={false}
+        target={[0,0,0]}
+      />
+
       <group ref={groupRef}>
         {movies.map((m, i) => (
           <MoviePoster key={`${m.id}-${i}`} movie={m} position={positions[i] || new THREE.Vector3(0,0,0)} onSelect={onSelect} isSelected={selectedMovie?.id === m.id} />
@@ -90,16 +124,20 @@ export default function App() {
   const [selected, setSelected] = useState(null);
   const [view, setView] = useState('explore');
   const [query, setQuery] = useState('');
+  const [genre, setGenre] = useState(null); // null = popular
   const [loading, setLoading] = useState(false);
+  const [trailerKey, setTrailerKey] = useState(null); // For YouTube Video
   const [page, setPage] = useState(1);
-  const targetPos = useRef({ pos: new THREE.Vector3(0, 0, 40), active: false });
+  
+  // Camera Target for Warp Effect
+  const targetPos = useRef({ pos: new THREE.Vector3(0, 0, 40), active: true });
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => setUser(u));
     return unsub;
   }, []);
 
-  // Real-time Favorites Sync
+  // Sync Favorites
   useEffect(() => {
     if (!user) return;
     const unsub = onSnapshot(collection(db, "users", user.uid, "favorites"), (snap) => {
@@ -111,13 +149,21 @@ export default function App() {
     return unsub;
   }, [user, view]);
 
-  const loadMovies = async (isSearch = false) => {
-    if (view === 'favs' && !isSearch) return;
+  // Load Movies (Popular, Search, or Genre)
+  const loadMovies = async (reset = false) => {
+    if (view === 'favs') return;
     setLoading(true);
     try {
-      const endpoint = isSearch 
-        ? `https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(query)}`
-        : `https://api.themoviedb.org/3/movie/popular?api_key=${TMDB_KEY}&page=${page}`;
+      let endpoint;
+      const currentPage = reset ? 1 : page;
+
+      if (query) {
+        endpoint = `https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(query)}&page=${currentPage}`;
+      } else if (genre) {
+        endpoint = `https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&with_genres=${genre}&page=${currentPage}`;
+      } else {
+        endpoint = `https://api.themoviedb.org/3/movie/popular?api_key=${TMDB_KEY}&page=${currentPage}`;
+      }
       
       const res = await fetch(endpoint);
       const data = await res.json();
@@ -126,9 +172,11 @@ export default function App() {
         overview: m.overview, rating: m.vote_average
       }));
 
-      if (isSearch) {
+      if (reset) {
         setMovies(formatted);
-        targetPos.current = { pos: new THREE.Vector3(0, 0, 40), active: false };
+        setPage(2);
+        // Warp Camera Reset
+        targetPos.current = { pos: new THREE.Vector3(0, 0, 40), active: true };
       } else {
         setMovies(prev => [...prev, ...formatted]);
         setPage(p => p + 1);
@@ -137,14 +185,30 @@ export default function App() {
     setLoading(false);
   };
 
-  useEffect(() => { if (user && view === 'explore') loadMovies(); }, [user, view === 'explore']);
+  useEffect(() => { if (user && view === 'explore') loadMovies(true); }, [user, view, genre]);
 
   const handleSearch = (e) => {
     e.preventDefault();
     if (!query.trim()) return;
+    setGenre(null); // Clear genre if searching
     setSelected(null);
-    targetPos.current = { pos: new THREE.Vector3(0, 20, 80), active: true };
-    setTimeout(() => loadMovies(true), 500);
+    loadMovies(true);
+  };
+
+  const handleGenreChange = (newGenreId) => {
+    setQuery(''); // Clear search if picking genre
+    setGenre(newGenreId);
+    setSelected(null);
+  };
+
+  const fetchTrailer = async (movie) => {
+    try {
+      const res = await fetch(`https://api.themoviedb.org/3/movie/${movie.id}/videos?api_key=${TMDB_KEY}`);
+      const data = await res.json();
+      const trailer = data.results.find(v => v.type === "Trailer" && v.site === "YouTube");
+      if (trailer) setTrailerKey(trailer.key);
+      else alert("No trailer available for this movie yet!");
+    } catch (e) { console.error("Trailer Error", e); }
   };
 
   const toggleFav = async (movie) => {
@@ -173,50 +237,89 @@ export default function App() {
         <GlobeScene movies={movies} targetPos={targetPos} selectedMovie={selected} onSelect={(m, p) => { setSelected(m); targetPos.current = { pos: p.clone().multiplyScalar(1.35), active: true }; }} />
       </Canvas>
 
-      {/* Top UI: Search & Tabs */}
-      <div className="absolute top-8 w-full px-10 flex flex-col md:flex-row justify-between items-center gap-6 z-20">
-        <div className="flex gap-4 p-1 bg-white/5 backdrop-blur-3xl rounded-full border border-white/10">
-          <button onClick={() => setView('explore')} className={`px-8 py-3 rounded-full text-[10px] font-black uppercase tracking-[0.2em] transition-all ${view === 'explore' ? 'bg-white text-black' : 'text-white/40'}`}>Explore</button>
-          <button onClick={() => setView('favs')} className={`px-8 py-3 rounded-full text-[10px] font-black uppercase tracking-[0.2em] transition-all ${view === 'favs' ? 'bg-white text-black' : 'text-white/40'}`}>My Galaxy ({Object.keys(favs).length})</button>
+      {/* TOP BAR */}
+      <div className="absolute top-8 w-full px-4 md:px-10 flex flex-col md:flex-row justify-between items-center gap-4 z-20 pointer-events-none">
+        
+        {/* Toggle & Genre */}
+        <div className="flex flex-wrap justify-center gap-4 pointer-events-auto">
+          <div className="flex gap-2 p-1 bg-white/5 backdrop-blur-3xl rounded-full border border-white/10">
+            <button onClick={() => {setView('explore'); setGenre(null);}} className={`px-6 py-3 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${view === 'explore' ? 'bg-white text-black' : 'text-white/40'}`}>Explore</button>
+            <button onClick={() => setView('favs')} className={`px-6 py-3 rounded-full text-[10px] font-black uppercase tracking-widest transition-all ${view === 'favs' ? 'bg-white text-black' : 'text-white/40'}`}>Favs</button>
+          </div>
+
+          {view === 'explore' && (
+            <div className="relative group">
+               <button className="flex items-center gap-2 px-6 py-4 rounded-full bg-white/5 backdrop-blur-3xl border border-white/10 text-[10px] font-bold uppercase tracking-widest hover:bg-white hover:text-black transition-all">
+                 <Filter size={14}/> {GENRES.find(g => g.id === genre)?.name || 'Genre'}
+               </button>
+               {/* Dropdown */}
+               <div className="absolute top-full left-0 mt-2 w-48 bg-black/90 border border-white/10 rounded-2xl overflow-hidden hidden group-hover:block max-h-60 overflow-y-auto">
+                 {GENRES.map(g => (
+                   <button key={g.id} onClick={() => handleGenreChange(g.id)} className="w-full text-left px-6 py-3 text-[10px] uppercase font-bold hover:bg-white hover:text-black transition-all">
+                     {g.name}
+                   </button>
+                 ))}
+               </div>
+            </div>
+          )}
         </div>
 
+        {/* Search */}
         {view === 'explore' && (
-          <form onSubmit={handleSearch} className="relative w-full max-w-md">
-            <input type="text" placeholder="Search the void..." value={query} onChange={(e) => setQuery(e.target.value)} className="w-full bg-white/5 backdrop-blur-3xl border border-white/10 px-14 py-4 rounded-full outline-none focus:border-white/30 text-sm tracking-widest" />
-            <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-white/30" size={20} />
-            {loading && <Loader2 className="absolute right-5 top-1/2 -translate-y-1/2 animate-spin text-yellow-500" size={20} />}
+          <form onSubmit={handleSearch} className="relative w-full max-w-xs md:max-w-md pointer-events-auto">
+            <input type="text" placeholder="Search..." value={query} onChange={(e) => setQuery(e.target.value)} className="w-full bg-white/5 backdrop-blur-3xl border border-white/10 px-12 py-4 rounded-full outline-none focus:border-white/30 text-xs tracking-widest" />
+            <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-white/30" size={16} />
+            {loading && <Loader2 className="absolute right-5 top-1/2 -translate-y-1/2 animate-spin text-yellow-500" size={16} />}
           </form>
         )}
 
-        <button onClick={() => signOut(auth)} className="text-white/20 hover:text-red-500 transition-all flex items-center gap-2 group">
-          <span className="text-[10px] font-bold tracking-widest opacity-0 group-hover:opacity-100 uppercase">{user.displayName}</span>
-          <LogOut size={22}/>
+        {/* Profile */}
+        <button onClick={() => signOut(auth)} className="pointer-events-auto text-white/20 hover:text-red-500 transition-all hidden md:block">
+           <LogOut size={22}/>
         </button>
       </div>
 
-      {/* Infinite Expand Button */}
+      {/* Expand Button */}
       {view === 'explore' && !selected && (
-        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-10">
-          <button onClick={() => loadMovies()} className="flex items-center gap-3 px-10 py-5 rounded-full bg-white/5 backdrop-blur-xl border border-white/10 hover:bg-white/10 transition-all">
-            <Zap size={18} className="text-yellow-400 fill-yellow-400" />
-            <span className="font-black tracking-[0.2em] text-[10px] uppercase">Expand Galaxy</span>
+        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-10 pointer-events-auto">
+          <button onClick={() => loadMovies()} className="flex items-center gap-3 px-8 py-4 rounded-full bg-white/5 backdrop-blur-xl border border-white/10 hover:bg-white/10 transition-all active:scale-95">
+            <Zap size={16} className="text-yellow-400 fill-yellow-400" />
+            <span className="font-black tracking-[0.2em] text-[10px] uppercase">More</span>
           </button>
         </div>
       )}
 
-      {/* Detail Panel */}
+      {/* TRAILER MODAL */}
+      {trailerKey && (
+        <div className="absolute inset-0 z-[60] bg-black/90 flex items-center justify-center p-4 md:p-20 animate-in fade-in duration-300">
+           <div className="relative w-full max-w-5xl aspect-video bg-black rounded-3xl overflow-hidden shadow-2xl border border-white/10">
+              <button onClick={() => setTrailerKey(null)} className="absolute top-6 right-6 z-10 p-2 bg-black/50 rounded-full hover:bg-white hover:text-black transition-all"><X size={24}/></button>
+              <iframe 
+                width="100%" height="100%" 
+                src={`https://www.youtube.com/embed/${trailerKey}?autoplay=1`} 
+                title="Trailer" frameBorder="0" 
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                allowFullScreen
+              ></iframe>
+           </div>
+        </div>
+      )}
+
+      {/* DETAIL PANEL */}
       {selected && (
-        <div className="absolute inset-y-0 right-0 z-50 flex items-center p-8 pointer-events-none">
-          <div className="w-[440px] p-12 rounded-[3.5rem] pointer-events-auto bg-black/50 backdrop-blur-[40px] border border-white/10 shadow-2xl animate-in slide-in-from-right-10">
-            <button onClick={() => { setSelected(null); targetPos.current.active = false; }} className="absolute top-10 right-10 text-white/20 hover:text-white"><X size={32}/></button>
+        <div className="absolute inset-y-0 right-0 z-50 flex items-end md:items-center p-0 md:p-8 pointer-events-none w-full md:w-auto">
+          <div className="w-full md:w-[450px] p-8 md:p-12 rounded-t-[3rem] md:rounded-[3.5rem] pointer-events-auto bg-[#0a0a0a]/80 backdrop-blur-[40px] border-t md:border border-white/10 shadow-2xl animate-in slide-in-from-bottom-10 md:slide-in-from-right-10 duration-500">
+            <button onClick={() => { setSelected(null); targetPos.current.active = false; }} className="absolute top-8 right-8 text-white/20 hover:text-white transition-all"><X size={32}/></button>
             <div className="flex items-center gap-2 mb-6 text-yellow-500 font-black tracking-[0.2em] text-[10px] uppercase">
               <Star size={16} fill="currentColor" /> {selected.rating.toFixed(1)} / 10
             </div>
-            <h2 className="text-5xl font-black mb-6 uppercase tracking-tighter leading-none">{selected.title}</h2>
-            <p className="text-white/40 mb-10 text-lg leading-relaxed line-clamp-6">{selected.overview}</p>
+            <h2 className="text-4xl md:text-5xl font-black mb-6 uppercase tracking-tighter leading-none">{selected.title}</h2>
+            <p className="text-white/40 mb-10 text-sm md:text-lg leading-relaxed line-clamp-4">{selected.overview}</p>
             <div className="flex gap-4">
-              <button className="flex-1 bg-white text-black py-6 rounded-2xl font-black uppercase tracking-widest text-[10px]">Watch Trailer</button>
-              <button onClick={() => toggleFav(selected)} className={`p-6 rounded-2xl border transition-all active:scale-90 ${favs[selected.id] ? 'bg-red-600 border-red-600 shadow-[0_0_20px_rgba(220,38,38,0.3)]' : 'border-white/10 hover:bg-white/10'}`}>
+              <button onClick={() => fetchTrailer(selected)} className="flex-1 bg-white text-black py-5 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:scale-105 transition-all flex items-center justify-center gap-2">
+                <PlayCircle size={16} /> Trailer
+              </button>
+              <button onClick={() => toggleFav(selected)} className={`p-5 rounded-2xl border transition-all active:scale-90 ${favs[selected.id] ? 'bg-red-600 border-red-600' : 'border-white/10 hover:bg-white/10'}`}>
                 <Heart size={24} fill={favs[selected.id] ? "white" : "none"} />
               </button>
             </div>
