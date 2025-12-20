@@ -1,4 +1,5 @@
 # 🌌 Movie Galaxy: A Spatial Discovery Engine
+<img width="996" height="635" alt="Movie_Globe" src="https://github.com/user-attachments/assets/1e991200-7b75-46f1-8cbd-fea0a09c8d16" />
 
 ![Vercel Deployment](https://img.shields.io/badge/Vercel-Deployed-black?style=for-the-badge&logo=vercel)
 ![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
