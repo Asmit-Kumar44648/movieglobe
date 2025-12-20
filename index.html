@@ -3,8 +3,35 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Movie Globe</title>
+    <title>Movie Galaxy</title>
+    
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              galaxy: '#000205',
+            }
+          }
+        },
+        // This is the key: it tells the browser we are intentionally using the JIT engine
+        corePlugins: {
+          preflight: true,
+        }
+      }
+    </script>
+
+    <style type="text/css">
+      /* This ensures there is NO white flash during loading */
+      body, html, #root {
+        background-color: #000205 !important;
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+      }
+    </style>
   </head>
   <body class="bg-black">
     <div id="root"></div>
