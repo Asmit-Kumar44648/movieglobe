@@ -26,6 +26,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const provider = new GoogleAuthProvider();
+provider.setCustomParameters({ prompt: 'select_account' }); // Fixes the COOP window.closed error
 
 const GENRES = [
   { id: null, name: 'Trending', color: '#00f2ff' },
@@ -37,7 +38,7 @@ const GENRES = [
 ];
 
 // --- SPACE DUST ---
-function SpaceDust({ count = 2000 }) {
+function SpaceDust({ count = 1200 }) { // Slightly reduced count for stability
   const points = useMemo(() => {
     const p = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
@@ -48,7 +49,7 @@ function SpaceDust({ count = 2000 }) {
     return p;
   }, [count]);
   const ref = useRef();
-  useFrame(() => { if (ref.current) ref.current.rotation.y += 0.0005; });
+  useFrame(() => { if (ref.current) ref.current.rotation.y += 0.0003; });
   return (
     <Points ref={ref} positions={points} stride={3}>
       <PointMaterial transparent color="#ffffff" size={0.05} sizeAttenuation={true} depthWrite={false} opacity={0.3} />
@@ -71,17 +72,19 @@ function MoviePoster({ movie, position, onSelect, isSelected }) {
           transparent 
           scale={isSelected ? [4, 6] : [1.8, 2.7]} 
           onClick={(e) => { e.stopPropagation(); onSelect(movie, position); }}
+          alt={movie.title}
         />
       </Float>
-      {!isSelected && <Text position={[0, -1.9, 0]} fontSize={0.16} color="white" textAlign="center" anchorX="center" anchorY="middle">{movie.title}</Text>}
+      {!isSelected && <Text position={[0, -2, 0]} fontSize={0.16} color="white" textAlign="center" anchorX="center">{movie.title}</Text>}
     </group>
   );
 }
 
 function GlobeScene({ movies, onSelect, targetPos, selectedMovie, genreColor, isWarping }) {
-  const { camera } = useThree();
+  const { camera, gl } = useThree();
   const groupRef = useRef();
   const radius = useMemo(() => Math.sqrt(movies.length || 1) * 3 + 18, [movies.length]);
+  
   const positions = useMemo(() => {
     const phi = Math.PI * (3 - Math.sqrt(5));
     return movies.map((_, i) => {
@@ -103,7 +106,7 @@ function GlobeScene({ movies, onSelect, targetPos, selectedMovie, genreColor, is
   return (
     <>
       <color attach="background" args={['#000308']} />
-      <Stars radius={150} depth={50} count={9000} factor={4} fade speed={1} />
+      <Stars radius={150} depth={50} count={5000} factor={4} fade speed={1} />
       <SpaceDust />
       <ambientLight intensity={0.4} />
       <pointLight position={[0, 0, 0]} intensity={3} color={genreColor} />
@@ -113,11 +116,13 @@ function GlobeScene({ movies, onSelect, targetPos, selectedMovie, genreColor, is
           <MoviePoster key={`${m.id}-${i}`} movie={m} position={positions[i]} onSelect={onSelect} isSelected={selectedMovie?.id === m.id} />
         ))}
       </group>
-      <EffectComposer disableNormalPass>
-        <Bloom luminanceThreshold={1} intensity={1.5} radius={0.4} />
-        <Vignette darkness={1.1} />
-        <ChromaticAberration offset={[0.0006, 0.0006]} />
-      </EffectComposer>
+      <Suspense fallback={null}>
+        <EffectComposer disableNormalPass multisampling={0}>
+          <Bloom luminanceThreshold={1} intensity={1.2} radius={0.4} mipmapBlur />
+          <Vignette darkness={0.9} />
+          <ChromaticAberration offset={[0.0005, 0.0005]} />
+        </EffectComposer>
+      </Suspense>
     </>
   );
 }
@@ -205,12 +210,17 @@ export default function App() {
       const data = await res.json();
       const trailer = data.results?.find(v => v.type === "Trailer" && v.site === "YouTube");
       if (trailer) setTrailerKey(trailer.key);
+      else alert("Trailer not found in Galaxy database.");
     } catch (e) { console.error(e); }
   };
 
   if (!user) return (
     <div className="h-screen w-full bg-black flex flex-col items-center justify-center text-white p-10 overflow-hidden relative">
-      <div className="absolute inset-0 opacity-30"><Canvas><Stars/></Canvas></div>
+      <div className="absolute inset-0 opacity-30">
+        <Canvas gl={{ powerPreference: "high-performance" }}>
+            <Stars/>
+        </Canvas>
+      </div>
       <div className="z-10 text-center space-y-12">
         <h1 className="text-[clamp(80px,15vw,160px)] font-black italic uppercase tracking-tighter leading-none bg-gradient-to-b from-white to-white/10 bg-clip-text text-transparent">Galaxy</h1>
         <button onClick={() => signInWithPopup(auth, provider)} className="w-full bg-white text-black py-6 px-12 rounded-2xl font-black uppercase tracking-widest hover:scale-105 transition-all shadow-2xl">Continue with Google</button>
@@ -220,7 +230,15 @@ export default function App() {
 
   return (
     <div className="h-screen w-full bg-[#000308] relative overflow-hidden text-white font-sans">
-      <Canvas dpr={[1, 2]} camera={{ fov: 45, near: 0.1, far: 1000 }}>
+      <Canvas 
+        dpr={[1, 1.5]} // Lowering DPR slightly prevents Context Lost on mobile/browsers
+        gl={{ 
+            antialias: false, 
+            powerPreference: "high-performance",
+            preserveDrawingBuffer: true 
+        }} 
+        camera={{ fov: 45, near: 0.1, far: 1000 }}
+      >
         <Suspense fallback={null}>
           <GlobeScene movies={movies} onSelect={handleSelect} targetPos={targetPos} selectedMovie={selected} genreColor={activeGenreObj.color} isWarping={isWarping} />
         </Suspense>
@@ -290,9 +308,9 @@ export default function App() {
         </div>
       )}
 
-      {/* WARP BUTTON - NOW WORKS IN FAVS TO RETURN TO GALAXY */}
+      {/* WARP BUTTON */}
       {!selected && (
-        <button onClick={() => { if(view === 'favs') setView('explore'); else loadMovies(); }} className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-4 px-10 py-5 bg-white/5 backdrop-blur-[20px] border border-white/20 rounded-full font-black text-[10px] uppercase tracking-widest hover:bg-white/10 transition-all z-30 pointer-events-auto">
+        <button onClick={() => { if(view === 'favs') setView('explore'); else loadMovies(); }} className="absolute bottom-12 left-1/2 -translate-x-1/2 flex items-center gap-4 px-10 py-5 bg-white/5 backdrop-blur-[20px] border border-white/20 rounded-full font-black text-[10px] uppercase tracking-widest hover:bg-white/10 transition-all z-30 pointer-events-auto shadow-2xl">
           <Zap size={16} className="text-cyan-400 fill-cyan-400" /> {view === 'favs' ? 'Back to Galaxy' : 'Warp Forward'}
         </button>
       )}
